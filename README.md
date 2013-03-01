@@ -1,4 +1,4 @@
-LINQ-to-SQL-Batch-Updates-Deletes
+LINQ to SQL Batch Updates/Deletes
 =================================
 
-LINQ to SQL
+Author: http://terryaney.wordpress.com/2008/04/14/batch-updates-and-deletes-with-linq-to-sql/
