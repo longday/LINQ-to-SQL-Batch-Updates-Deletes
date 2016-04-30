@@ -1192,7 +1192,7 @@ namespace BTR.Core.Linq
 			return batchJoin;
 		}
 
-		private static string GetDbName<TEntity>( this Table<TEntity> table ) where TEntity : class
+		public static string GetDbName<TEntity>( this Table<TEntity> table ) where TEntity : class
 		{
 			var entityType = typeof( TEntity );
 			var metaTable = table.Context.Mapping.GetTable( entityType );
