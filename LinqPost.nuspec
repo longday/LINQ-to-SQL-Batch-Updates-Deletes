@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<package >
+  <metadata>
+    <id>$id$</id>
+    <version>1.0</version>
+    <title>LinqToSqlExtensions</title>
+    <authors>Terry Aney</authors>
+    <owners>Terry Aney</owners>
+    <projectUrl>https://bitbucket.org/terryaney/linqtosqlextensions</projectUrl>
+    <description>Linq-to-SQL extension methods for batched update and delete</description>
+    <releaseNotes>Initial release</releaseNotes>
+    <copyright>Copyright 2016</copyright>
+    <tags>LINQ SQL batch delete update</tags>
+  </metadata>
+</package>
