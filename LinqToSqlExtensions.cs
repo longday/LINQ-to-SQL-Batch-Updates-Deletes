@@ -1,4 +1,26 @@
-﻿using System;
+﻿/*
+Copyright(c) 2015 Terry Aney
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
+    
+using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.Common;
@@ -13,6 +35,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.ComponentModel.DataAnnotations;
+using System.Xml.Linq;
 
 namespace BTR.Core.Linq
 {
@@ -39,91 +62,101 @@ namespace BTR.Core.Linq
 		/// </summary>
 		/// <param name="query">Represents a SELECT query to execute.</param>
 		/// <param name="fileName">The name of the file to create.</param>
-		/// <param name="deleteFile">Whether or not to delete the file specified by <paramref name="fileName"/> if it exists.</param>
-		/// <remarks>
+        /// <param name="deleteFile">Whether or not to delete the file specified by <paramref name="fileName"/> if it exists.</param>
+        /// <param name="translateValue">A call back function used to translate the value if the raw value needs to be massaged.</param>
+        /// <remarks>
 		/// <para>If the <paramref name="query"/> contains any properties that are entity sets (i.e. rows from a FK relationship) the values will not be dumped to the file.</para>
 		/// <para>This method is useful for debugging purposes or when used in other utilities such as LINQPad.</para>
 		/// </remarks>
         public static T DumpCSV<T>( this T query, string fileName, bool deleteFile, Func<MemberInfo, object, object> translateValue = null ) where T : System.Collections.IEnumerable
+        {
+            if ( File.Exists( fileName ) && deleteFile )
+            {
+                File.Delete( fileName );
+            }
+            using ( var output = new FileStream( fileName, FileMode.CreateNew ) )
+            {
+                return query.DumpCSV( output, translateValue );
+            }
+        }
+
+        public static T DumpCSV<T>( this T query, Stream stream, string delimitter = ",", Encoding encoding = null ) where T : System.Collections.IEnumerable
+        {
+            return query.DumpCSV( stream, null, delimitter, encoding );
+        }
+
+        private static T DumpCSV<T>( this T query, Stream stream, Func<MemberInfo, object, object> translateValue = null, string delimitter = ",", Encoding encoding = null ) where T : System.Collections.IEnumerable
 		{
-			if ( File.Exists( fileName ) && deleteFile )
+            using ( var writer = new StreamWriter( stream, encoding ?? new UTF8Encoding( false, true ) ) )
 			{
-				File.Delete( fileName );
-			}
+				var firstRow = true;
 
-			using ( var output = new FileStream( fileName, FileMode.CreateNew ) )
-			{
-				using ( var writer = new StreamWriter( output ) )
+				PropertyInfo[] properties = null;
+				FieldInfo[] fields = null;
+				Type type = null;
+				bool typeIsAnonymous = false;
+
+				foreach ( var r in query )
 				{
-					var firstRow = true;
-
-					PropertyInfo[] properties = null;
-					FieldInfo[] fields = null;
-					Type type = null;
-					bool typeIsAnonymous = false;
-
-					foreach ( var r in query )
+					if ( type == null )
 					{
-						if ( type == null )
-						{
-							type = r.GetType();
-							typeIsAnonymous = type.IsAnonymous();
-                            properties = type.GetProperties().Where( p => IsCsvExportAllowed( p.PropertyType, (MemberInfo)p ) ).ToArray();
-                            fields = type.GetFields().Where( p => IsCsvExportAllowed( p.FieldType, (MemberInfo)p ) ).ToArray();
-						}
+						type = r.GetType();
+						typeIsAnonymous = type.IsAnonymous();
+                        properties = type.GetProperties().Where( p => IsCsvExportAllowed( p.PropertyType, (MemberInfo)p ) ).ToArray();
+                        fields = type.GetFields().Where( p => IsCsvExportAllowed( p.FieldType, (MemberInfo)p ) ).ToArray();
+					}
 
-						var firstCol = true;
+					var firstCol = true;
 
-						if ( firstRow )
-						{
-
-                            foreach ( var p in properties )
-                            {
-                                if ( !firstCol ) writer.Write( "," );
-                                else { firstCol = false; }
-
-                                writer.Write( CsvHeaderName( (MemberInfo)p ) );
-                            }
-
-                            foreach ( var p in fields )
-                            {
-                                if ( !firstCol ) writer.Write( "," );
-                                else { firstCol = false; }
-
-                                writer.Write( CsvHeaderName( (MemberInfo)p ) );
-                            }
-							
-							writer.WriteLine();
-						}
-						firstRow = false;
-						firstCol = true;
+					if ( firstRow )
+					{
 
                         foreach ( var p in properties )
-						{
-							if ( !firstCol ) writer.Write( "," );
-							else { firstCol = false; }
+                        {
+                            if ( !firstCol ) writer.Write( delimitter );
+                            else { firstCol = false; }
 
-                            var value = translateValue != null
-                                ? translateValue( p, r )
-                                : p.GetValue( r, null );
-
-							DumpValue( value, writer );
-						}
+                            writer.Write( CsvHeaderName( (MemberInfo)p ) );
+                        }
 
                         foreach ( var p in fields )
                         {
-                            if ( !firstCol ) writer.Write( "," );
+                            if ( !firstCol ) writer.Write( delimitter );
                             else { firstCol = false; }
 
-                            var value = translateValue != null
-                                ? translateValue( p, r )
-                                : p.GetValue( r );
-
-                            DumpValue( value, writer );
+                            writer.Write( CsvHeaderName( (MemberInfo)p ) );
                         }
-
+							
 						writer.WriteLine();
 					}
+					firstRow = false;
+					firstCol = true;
+
+                    foreach ( var p in properties )
+					{
+                        if ( !firstCol ) writer.Write( delimitter );
+						else { firstCol = false; }
+
+                        var value = translateValue != null
+                            ? translateValue( p, r )
+                            : p.GetValue( r, null );
+
+                        DumpValue( value, writer, delimitter );
+					}
+
+                    foreach ( var p in fields )
+                    {
+                        if ( !firstCol ) writer.Write( delimitter );
+                        else { firstCol = false; }
+
+                        var value = translateValue != null
+                            ? translateValue( p, r )
+                            : p.GetValue( r );
+
+                        DumpValue( value, writer, delimitter );
+                    }
+
+					writer.WriteLine();
 				}
 			}
 
@@ -133,7 +166,7 @@ namespace BTR.Core.Linq
         /// <summary>
         /// Returns all fields/properties from <paramref name="source"/> except for the field(s)/property(ies) listed in the selector expression.
         /// </summary>
-        public static IQueryable SelectExcept<TSource, TResult>( this IQueryable<TSource> source, Expression<Func<TSource, TResult>> selector )
+        public static IQueryable SelectExcept<TSource, TResult>( this IEnumerable<TSource> source, Expression<Func<TSource, TResult>> selector )
         {
             var newExpression = selector.Body as NewExpression;
 
@@ -142,18 +175,18 @@ namespace BTR.Core.Linq
                     : new[] { ( (MemberExpression)selector.Body ).Member.Name };
             
             var sourceType = typeof( TSource );
-            var allowedSelectTypes = new Type[] { typeof( string ), typeof( ValueType ) };
+            var allowedSelectTypes = new Type[] { typeof( string ), typeof( ValueType ), typeof( XElement ) };
             var sourceProperties = sourceType.GetProperties( BindingFlags.Public | BindingFlags.Instance ).Where( p => allowedSelectTypes.Any( t => t.IsAssignableFrom( ( (PropertyInfo)p ).PropertyType ) ) ).Select( p => ( (MemberInfo)p ).Name );
             var sourceFields = sourceType.GetFields( BindingFlags.Public | BindingFlags.Instance ).Where( f => allowedSelectTypes.Any( t => t.IsAssignableFrom( ( (FieldInfo)f ).FieldType ) ) ).Select( f => ( (MemberInfo)f ).Name );
 
             var selectFields = sourceProperties.Concat( sourceFields ).Where( p => !excludeProperties.Contains( p ) ).ToArray();
-            
+
             var dynamicSelect = 
                     string.Format( "new( {0} )",
                             string.Join( ", ", selectFields ) );
 
             return selectFields.Count() > 0
-                ? source.Select( dynamicSelect )
+                ? source.AsQueryable().Select( dynamicSelect )
                 : Enumerable.Empty<TSource>().AsQueryable<TSource>();
         }
 
@@ -194,7 +227,7 @@ namespace BTR.Core.Linq
             return authIdAttr != null ? name + "/key" : name;
         }
 
-        private static void DumpValue( object v, StreamWriter writer )
+        private static void DumpValue( object v, StreamWriter writer, string delimitter )
 		{
 			if ( v != null )
 			{
@@ -203,7 +236,8 @@ namespace BTR.Core.Linq
 					// csv encode the value
                     case TypeCode.String:
                         string value = (string)v;
-						if ( value.Contains( "," ) || value.Contains( '"' ) || value.Contains( "\n" ) )
+
+                        if ( value.Contains( delimitter ) || value.Contains( '"' ) || value.Contains( "\n" ) )
 						{
 							value = value.Replace( "\"", "\"\"" );
 
@@ -664,7 +698,53 @@ namespace BTR.Core.Linq
 			return cmd.PreviewCommandText( false);
 		}
 
-		/// <summary>
+        /// <summary>
+        /// Returns a string representation the LINQ <see cref="IProvider"/> command text and parameters used that would be issued to perform the query's select statement.
+        /// </summary>
+        /// <param name="context">The DataContext to execute the batch select against.</param>
+        /// <param name="query">Represents the SELECT query to execute.</param>
+        /// <returns>Returns a string representation of the <see cref="DbCommand.CommandText"/> along with <see cref="DbCommand.Parameters"/> if present.</returns>
+        /// <remarks>This method is useful for debugging purposes or when used in other utilities such as LINQPad.</remarks>
+        public static string TranslateToSqlCommand( this DataContext context, IQueryable query )
+        {
+            var cmd = context.GetCommand( query );
+            var output = new StringBuilder();
+
+            var statements = cmd.CommandText.Replace( "\r\n", "\r" ).Split( '\r' );
+
+            statements = statements.Take( 1 ).Select( s => "\"" + s + "\"" ).Concat(
+                            statements.Skip( 1 ).Select( s => "              \"" + s + "\"" ) ).ToArray();
+
+            output.AppendLine( "#region - SQL -\r\n" );
+            output.AppendLine( string.Format( "var sqlText = {0};", string.Join( " +\r\n", statements ) ) );
+            output.AppendLine( "#endregion\r\n" );
+
+            output.AppendLine( "using ( var connection = new SqlConnection( ... ) )" );
+            output.AppendLine( "{" );
+                output.AppendLine( "\tusing ( var command = new SqlCommand( sqlText, connection ) )" );
+                output.AppendLine( "\t{" );
+
+                if ( cmd.Parameters.Count > 0 )
+                {
+                    foreach ( DbParameter p in cmd.Parameters )
+                    {
+                        var p2 = p as SqlParameter;
+                        output.AppendLine( string.Format( "\t\tcommand.Parameters.Add( new SqlParameter( \"{0}\", {1} ) );", p.ParameterName, GetParameterTransactValue( p, p2, true ) ) );
+                    }
+                    output.AppendLine( "" );
+
+                    output.AppendLine( "\t\t\tusing ( var reader = command.ExecuteReader() )" );
+                    output.AppendLine( "\t\t\t{" );
+                    output.AppendLine( "\t\t\t}" );
+                }
+                
+                output.AppendLine( "\t}" );
+            output.AppendLine( "}" );
+
+            return output.ToString();
+        }
+        
+        /// <summary>
 		/// Returns a string representation of the <see cref="DbCommand.CommandText"/> along with <see cref="DbCommand.Parameters"/> if present.
 		/// </summary>
 		/// <param name="cmd">The <see cref="DbCommand"/> to analyze.</param>
@@ -713,7 +793,7 @@ namespace BTR.Core.Linq
 			return output.ToString();
 		}
 
-		private static string GetParameterTransactValue( DbParameter parameter, SqlParameter parameter2 )
+		private static string GetParameterTransactValue( DbParameter parameter, SqlParameter parameter2, bool forSqlConversion = false )
 		{
 			if ( parameter2 == null ) return parameter.Value.ToString(); // Not going to deal with NON SQL parameters.
 
@@ -730,7 +810,7 @@ namespace BTR.Core.Linq
 				case SqlDbType.Text:
 				case SqlDbType.VarChar:
 				case SqlDbType.UniqueIdentifier:
-					return string.Format( "'{0}'", parameter2.SqlValue );
+					return string.Format( "{0}{1}{0}", forSqlConversion ? "\"" : "'", parameter2.SqlValue );
 
 				default:
 					return parameter2.SqlValue.ToString();
@@ -993,7 +1073,58 @@ namespace BTR.Core.Linq
 				throw new MissingPrimaryKeyException( string.Format( "{0} does not have a primary key defined.  Batch updating/deleting can not be used for tables without a primary key.", metaTable.TableName ) );
 			}
 
-			join = join.Substring( 0, join.Length - 5 );											// Remove last ' AND '
+            #region - Email Regarding code below
+            /*
+                So…to be honest an old employee helped me write some of this library.  Specifically the code around Expression tree manipulation and visiting.  I’ve reached out to him but testing…
+
+                a) When you have the CompiledQuery.Compile() version of code, when I attempt to get the underlying ‘sql’ query that the variable posts would be created by, I am returned “SELECT NULL AS [EMPTY]” from the following code:
+
+			                var selectCommand = table.Context.GetCommand( entities );
+			                var select = selectCommand.CommandText;
+
+                   I’m not sure why LINQ to SQL is returning that ‘empty’ query to represent posts variable.  And if there is something else I can evaluate/visit to find the real query.  Similar problem found here: http://stackoverflow.com/questions/1719264/how-to-extract-the-sql-command-from-a-complied-linq-query I’m still googling.
+
+                b) Workaround #1: How often are you calling this method?  Would assume not very often?  If you remove the CompiledQuery.Compile() from you code it works.  Obviously it’ll have to compile the query each time, but if only running a handful of times, probably not a problem.
+
+                c) Workaround #2: If you change your static Func<> into a ‘real’ static function() { } it works as well.  I’m not versed enough in ‘compiled code’ versus CompiledQuery.Compile() to know the actual differences in how the compiler might optimized the static function() and any performance hits you might hit, but this might be acceptable solution as well.
+
+                I’ll let you know if I find anything.
+
+                On Aug 18, 2015, at 6:30 AM, Tomas Pettersson <Tomas.Pettersson@firefly.se> wrote:
+
+                Hi
+                Here is the code that tries to do an update batch:
+                           using (DataClasses1DataContext dbContext = new DataClasses1DataContext())
+                           {
+                               var posts = getXMgdParamRows(dbContext, 100);
+                               dbContext.T_AllMgdParams.UpdateBatch(posts, p => new T_AllMgdParam { Copy = 2 });
+                           }
+
+
+                And getXMgdParamRows looks like this:
+                       public static Func<DataClasses1DataContext, int, IQueryable<T_AllMgdParam>>
+                            getXMgdParamRows = CompiledQuery.Compile((DataClasses1DataContext dcFrom, int getRows) =>
+                            (from a in dcFrom.T_AllMgdParams
+                             orderby a.DateAndTime
+                             where a.Copy != 2
+                             select a).Take(getRows));
+
+
+                Yes, it's the same table.
+                /Tomas
+            */
+            #endregion
+
+            // Had to comment out again b/c if where has enumerable.Select( => ).Contains( ... ) you get a NULL AS [EMPTY] and the BatchJoin was returning entire query
+            // which corrupted the join sql
+            /*
+            else if ( select.IndexOf( "NULL AS [EMPTY]" ) >= 0 )
+            {
+                return select;  // calling function will throw exception
+            }
+            */
+
+            join = join.Substring( 0, join.Length - 5 );											// Remove last ' AND '
 			#region - Better ExpressionTree Handling Needed -
 			/*
 			
@@ -1038,6 +1169,7 @@ namespace BTR.Core.Linq
 			if something like this is going to happen.  I will explore it later.
 			*/
 			#endregion
+
 			var endSelect = select.IndexOf( "[t" );													// Get 'SELECT ' and any TOP clause if present
 			var selectClause = select.Substring( 0, endSelect );
 			var selectTableNameStart = endSelect + 1;												// Get the table name LINQ to SQL used in query generation
@@ -1060,7 +1192,7 @@ namespace BTR.Core.Linq
 			return batchJoin;
 		}
 
-		private static string GetDbName<TEntity>( this Table<TEntity> table ) where TEntity : class
+		public static string GetDbName<TEntity>( this Table<TEntity> table ) where TEntity : class
 		{
 			var entityType = typeof( TEntity );
 			var metaTable = table.Context.Mapping.GetTable( entityType );
@@ -1074,21 +1206,23 @@ namespace BTR.Core.Linq
 
 		private static string GetLog( this DataContext context )
 		{
-			PropertyInfo providerProperty = context.GetType().GetProperty( "Provider", BindingFlags.Instance | BindingFlags.NonPublic );
-			var provider = providerProperty.GetValue( context, null );
-			Type providerType = provider.GetType();
+            var providerProperty = context.GetType().GetProperty("Provider", BindingFlags.Instance | BindingFlags.NonPublic );
+            var provider = providerProperty.GetValue( context, null );
+            var providerType = provider.GetType();
 
-			PropertyInfo modeProperty = providerType.GetProperty( "Mode", BindingFlags.Instance | BindingFlags.NonPublic );
-			FieldInfo servicesField = providerType.GetField( "services", BindingFlags.Instance | BindingFlags.NonPublic );
-			object services = servicesField != null ? servicesField.GetValue( provider ) : null;
-			PropertyInfo modelProperty = services != null ? services.GetType().GetProperty( "Model", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.GetProperty ) : null;
+            var modeProperty = providerType.GetProperty("Mode", BindingFlags.Instance | BindingFlags.NonPublic );
+            var servicesField = providerType.GetField("services", BindingFlags.Instance | BindingFlags.NonPublic );
+            var services = servicesField != null ? servicesField.GetValue( provider ) : null;
+            var modelProperty = services != null ? services.GetType().GetProperty("Model", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.GetProperty ) : null;
+            var taType = providerType.Assembly.GetType("ThisAssembly", false );
+            var taVersion = taType != null ? taType.GetField("InformationalVersion", BindingFlags.Static | BindingFlags.NonPublic ) : null;
 
-			return string.Format( "-- Context: {0}({1}) Model: {2} Build: {3}\r\n",
-							providerType.Name,
-							modeProperty != null ? modeProperty.GetValue( provider, null ) : "unknown",
-							modelProperty != null ? modelProperty.GetValue( services, null ).GetType().Name : "unknown",
-							"3.5.21022.8" );
-		}
+            return string.Format("-- Context: {0} ({1}) Model: {2} Build: {3}\r\n",
+                providerType.Name,
+                modeProperty != null ? modeProperty.GetValue( provider, null ) : "unknown",
+                modelProperty != null ? modelProperty.GetValue( services, null ).GetType().Name : "unknown",
+                taVersion != null ? taVersion.GetValue( null ) : "3.5.21022.8");
+        }
 
 		/// <summary>
 		/// Returns a list of changed items inside the Context before being applied to the data store.
